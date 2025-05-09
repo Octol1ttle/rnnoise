@@ -21,7 +21,12 @@ if (NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/src/rnnoise_data.c")
     file(COPY ${rnnoise_model_SOURCE_DIR}/src/rnnoise_data.h DESTINATION "${CMAKE_CURRENT_LIST_DIR}/src")
 endif ()
 
-set(SOURCES
+add_library(rnnoise STATIC)
+
+add_compile_options(-O3 -s -fstack-protector-strong)
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+
+target_sources(rnnoise PRIVATE
     src/denoise.c
     src/rnn.c
     src/pitch.c
@@ -34,10 +39,41 @@ set(SOURCES
     src/rnnoise_tables.c
 )
 
-add_compile_options(-O3 -s -fstack-protector-strong)
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+option(RNNOISE_X86_RTCD OFF)
 
-add_library(rnnoise STATIC ${SOURCES})
+if (RNNOISE_X86_RTCD)
+    add_compile_definitions(RNN_ENABLE_X86_RTCD CPU_INFO_BY_ASM)
+
+    target_sources(rnnoise PRIVATE
+        src/x86/x86_dnn_map.c
+        src/x86/x86cpu.c
+    )
+
+    include(CheckSourceCompiles)
+    set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+    set(CMAKE_REQUIRED_INCLUDES src)
+
+    check_source_compiles(C
+"#ifndef __SSE4_1__
+#error SSE4.1 unavailable
+#endif"
+        SSE4_1_AVAILABLE)
+    if (SSE4_1_AVAILABLE)
+        message("Will use SSE4.1")
+        target_sources(rnnoise PRIVATE src/x86/nnet_sse4_1.c)
+    endif ()
+
+    check_source_compiles(C
+"#ifndef __AVX2__
+#error AVX2 unavailable
+#endif"
+        AVX2_AVAILABLE)
+    if (AVX2_AVAILABLE)
+        message("Will use AVX2")
+        target_sources(rnnoise PRIVATE src/x86/nnet_avx2.c)
+    endif ()
+endif ()
+
 target_include_directories(rnnoise PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
